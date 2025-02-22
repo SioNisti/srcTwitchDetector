@@ -9,6 +9,7 @@ namespace srcTwitchDetector
         [STAThread]
         private static void Main(string[] args)
         {
+            Console.Write("path to json file: ");
             string jsonfile = Console.ReadLine();
             //string jsonfile = @"P:\ae3 runs\ae26.json";
             JObject json;
@@ -56,6 +57,8 @@ namespace srcTwitchDetector
                     //Console.WriteLine(ex.ToString());
                 }
             }
+            Console.WriteLine("Done!");
+            Console.ReadKey();
         }
     }
 }
