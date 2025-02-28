@@ -1,64 +1,115 @@
 ﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
+using System.Threading.Tasks;
 
 namespace srcTwitchDetector
 {
     class Program
     {
-        [STAThread]
-        private static void Main(string[] args)
-        {
-            Console.Write("path to json file: ");
-            string jsonfile = Console.ReadLine();
-            //string jsonfile = @"P:\ae3 runs\ae26.json";
-            JObject json;
-            string copy = "";
+        private static readonly HttpClient client = new HttpClient();
 
-            Console.WriteLine(jsonfile);
-            using (StreamReader files = File.OpenText(jsonfile))
-            using (JsonTextReader reader = new JsonTextReader(files))
+        [STAThread]
+        private static async Task Main(string[] args)
+        {
+            Console.Write("Enter Game Name: ");
+            string gameName = Console.ReadLine();
+
+            // Fetch the game ID using the game name
+            string gameId = await GetGameIdByName(gameName);
+            if (string.IsNullOrEmpty(gameId))
             {
-                json = (JObject)JToken.ReadFrom(reader);
+                Console.WriteLine("Game not found.");
+                return;
             }
 
-            for (int i = 0; i < 200; i++)
-            {
-                try
-                {
-                    //Console.WriteLine(json["data"][i]["videos"].Children().ToList().ElementAt(0).Children().ToList()[0][0]["uri"]);
-                    if (json["data"][i]["videos"].Children().ToList().ElementAt(0).Children().ToList()[0][0]["uri"].ToString().Contains("twitch"))
-                    {
-                        /*
-                        Console.WriteLine($"{json["data"][i]["players"]["data"][0]["names"]["international"]} - " +
-                            $"{json["data"][i]["weblink"]} - " +
-                            $"{json["data"][i]["videos"].Children().ToList().ElementAt(0).Children().ToList()[0][0]["uri"]}");*/
-                        if (json["data"][i]["players"]["data"][0]["rel"].ToString() == "guest")
-                        {
-                            Console.WriteLine($"{json["data"][i]["players"]["data"][0]["name"]} - " +
-                            $"{json["data"][i]["weblink"]} - " +
-                            $"{json["data"][i]["videos"].Children().ToList().ElementAt(0).Children().ToList()[0][0]["uri"]}");
-                        } else
-                        {
-                            Console.WriteLine($"{json["data"][i]["players"]["data"][0]["names"]["international"]} - " +
-                            $"{json["data"][i]["weblink"]} - " +
-                            $"{json["data"][i]["videos"].Children().ToList().ElementAt(0).Children().ToList()[0][0]["uri"]}");
-                        }
-                        /*Console.WriteLine($"{json["data"][i]["players"]["data"][0]["names"]["international"]} - ");
-                        Console.WriteLine($"{json["data"][i]["weblink"]} - ");
-                        Console.WriteLine($"{json["data"][i]["videos"].Children().ToList().ElementAt(0).Children().ToList()[0][0]["uri"]}");*/
+            int offset = 0;
+            bool hasData;
+            var runsList = new List<RunInfo>();
 
-                        //Console.WriteLine($"{json["data"][i]["players"]["data"][0]["names"]["international"]}");
-                        //copy += $"{json["data"][i]["weblink"]} {json["data"][i]["videos"].Children().ToList().ElementAt(0).Children().ToList()[0][0]["uri"]}";
+            do
+            {
+                string apiUrl = $"https://www.speedrun.com/api/v1/runs?game={gameId}&orderby=submitted&direction=desc&embed=players&max=200&offset={offset}";
+                string jsonResponse = await client.GetStringAsync(apiUrl);
+                JObject json = JObject.Parse(jsonResponse);
+
+                var runs = json["data"];
+                hasData = runs.Any();
+
+                foreach (var run in runs)
+                {
+                    try
+                    {
+                        string playerName = run["players"]["data"][0]["rel"].ToString() == "guest" ?
+                            run["players"]["data"][0]["name"].ToString() :
+                            run["players"]["data"][0]["names"]["international"].ToString();
+
+                        var videoEntries = run["videos"]?.Children().ToList().ElementAtOrDefault(0)?.Children().ToList();
+                        if (videoEntries != null)
+                        {
+                            foreach (var video in videoEntries)
+                            {
+                                foreach (var uri in video.Children())
+                                {
+                                    if (uri["uri"] != null && uri["uri"].ToString().Contains("twitch"))
+                                    {
+                                        var runInfo = new RunInfo
+                                        {
+                                            PlayerName = playerName,
+                                            RunDate = run["date"]?.ToString(), // Use the "date" field
+                                            WebLink = run["weblink"].ToString(),
+                                            TwitchUri = uri["uri"].ToString(),
+                                            RunStatus = run["status"]["status"].ToString()
+                                        };
+                                        runsList.Add(runInfo);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        //Console.WriteLine(ex.ToString());
                     }
                 }
-                catch (Exception ex)
-                {
-                    //Console.WriteLine(ex.ToString());
-                }
-            }
-            Console.WriteLine("Done!");
+
+                offset += 200;
+            } while (hasData);
+
+            // Output the data as JSON
+            string jsonOutput = JsonConvert.SerializeObject(runsList, Formatting.Indented);
+            Console.WriteLine(jsonOutput);
+            File.WriteAllText($"{gameName}-{gameId}.json",jsonOutput);
+
+            Console.WriteLine($"Done!\nThe results have been saved as \"{gameName}-{gameId}.json\"");
             Console.ReadKey();
+        }
+
+        private static async Task<string> GetGameIdByName(string gameName)
+        {
+            string apiUrl = $"https://www.speedrun.com/api/v1/games?name={Uri.EscapeDataString(gameName)}";
+            string jsonResponse = await client.GetStringAsync(apiUrl);
+            JObject json = JObject.Parse(jsonResponse);
+
+            var games = json["data"];
+            if (games.Any())
+            {
+                return games[0]["id"].ToString();
+            }
+
+            return null;
+        }
+
+        public class RunInfo
+        {
+            public string PlayerName { get; set; }
+            public string RunDate { get; set; } // Date when the run was performed
+            public string WebLink { get; set; }
+            public string TwitchUri { get; set; }
+            public string RunStatus { get; set; }
         }
     }
 }
